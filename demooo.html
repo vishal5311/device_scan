@@ -1,0 +1,857 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI-Powered AR E-Waste Sorting</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
+    <script src="https://aframe.io/releases/1.2.0/aframe.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { text-align: center; font-family: Arial, sans-serif; }
+        video { width: 100%; max-width: 600px; border: 2px solid black; }
+        canvas { position: absolute; top: 0; left: 0; }
+        #info, #components, #materials { margin-top: 10px; font-size: 18px; }
+        .progress-bar { width: 100%; background-color: #ddd; margin-top: 10px; }
+        .progress-fill { height: 20px; background-color: green; width: 0%; transition: width 0.3s; }
+        #ar-scene { width: 100%; height: 400px; }
+        #material-chart { width: 100%; height: 200px; }
+        #periodic-table { margin-top: 20px; }
+        #comparison-chart { width: 100%; height: 250px; margin-top: 20px; }
+        #environmental-impact { margin-top: 20px; padding: 15px; background-color: #f5f5f5; border-radius: 10px; }
+        #device-value { margin-top: 20px; padding: 15px; background-color: #f5f5f5; border-radius: 10px; }
+        .achievement { 
+            background-color: #ffffcc; 
+            border-left: 4px solid gold; 
+            padding: 10px; 
+            margin: 5px 0; 
+            text-align: left;
+            animation: fadeIn 1s;
+        }
+        .notification {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background-color: #4CAF50;
+            color: white;
+            padding: 15px;
+            border-radius: 5px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+            z-index: 1000;
+            animation: slideIn 0.5s ease-out;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        @keyframes slideIn {
+            from { transform: translateX(100%); }
+            to { transform: translateX(0); }
+        }
+        #blockchain-verification { margin-top: 20px; }
+    </style>
+</head>
+<body>
+    <h1>AI-Powered AR E-Waste Sorting</h1>
+    <video id="video" autoplay playsinline></video>
+    <canvas id="canvas"></canvas>
+    <p id="info">Point your camera at the back of an electronic device to analyze its inner components!</p>
+    <p id="components">Detected components will appear here.</p>
+    <p id="materials">Material analysis will be displayed here.</p>
+    <div class="progress-bar">
+        <div id="progressFill" class="progress-fill"></div>
+    </div>
+    <p id="score">Score: 0</p>
+    <div id="material-chart"><canvas id="chartCanvas"></canvas></div>
+    <div id="comparison-chart"><canvas id="comparisonCanvas"></canvas></div>
+    <div id="environmental-impact">
+        <h3>Environmental Impact Assessment</h3>
+        <div id="impact-results">Scan a device to see environmental impact data</div>
+    </div>
+    <div id="device-value">
+        <h3>Material Value Estimation</h3>
+        <div id="value-results">Scan a device to estimate material value</div>
+        <select id="device-condition" style="margin-top: 10px;">
+            <option value="new">New</option>
+            <option value="good" selected>Good</option>
+            <option value="fair">Fair</option>
+            <option value="poor">Poor</option>
+        </select>
+        <button id="estimate-button" style="margin-left: 10px;">Estimate Value</button>
+    </div>
+    <div id="blockchain-verification">
+        <h3>Recycling Verification</h3>
+        <div id="verification-results">Scan a device to generate recycling verification</div>
+        <button id="verify-button" style="margin-top: 10px;">Generate Verification Token</button>
+    </div>
+    <div id="periodic-table">
+        <h2>Periodic Table Highlights</h2>
+        <p id="elements"></p>
+    </div>
+    <a-scene id="ar-scene" embedded arjs>
+        <a-marker preset="hiro">
+            <a-entity id="inner-components" gltf-model="assets/models/phone-inner.glb" scale="0.5 0.5 0.5" rotation="0 90 0"></a-entity>
+        </a-marker>
+        <a-entity camera></a-entity>
+    </a-scene>
+
+    <script>
+        // Material colors for consistent visualization
+        const materialColors = [
+            '#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0', '#9966FF', '#FF9F40', 
+            '#8AC1DC', '#D6BF6C', '#C68FB4', '#A7DC8A', '#D68F8F'
+        ];
+    
+        const objectModels = {
+            "cell phone": "assets/models/phone.glb",
+            "laptop": "assets/models/laptop.glb",
+            "keyboard": "assets/models/keyboard.glb",
+            "mouse": "assets/models/mouse.glb",
+            "tv": "assets/models/tv.glb"
+        };
+
+        const sortingInfo = {
+            "cell phone": "Recycle at an e-waste center. Remove battery before disposal!",
+            "laptop": "Take to an e-waste recycling unit. Consider donating if functional!",
+            "keyboard": "Check for refurbishment options before disposal!",
+            "mouse": "Separate plastic and electronic parts before recycling!",
+            "tv": "Handle with care! Contains hazardous materials. Dispose at certified centers."
+        };
+
+        const componentsInfo = {
+            "cell phone": ["Battery", "Circuit Board", "Camera Module", "Display Screen", "Charging Port"],
+            "laptop": ["Motherboard", "RAM", "SSD/HDD", "Keyboard", "Display Panel", "Battery"],
+            "keyboard": ["Key Switches", "Circuit Board", "LED Backlight", "USB Connector"],
+            "mouse": ["Optical Sensor", "PCB", "Scroll Wheel", "USB/Bluetooth Module"],
+            "tv": ["Power Supply Board", "LED/LCD Panel", "T-Con Board", "Speakers", "Circuit Board"]
+        };
+
+        const materialInfo = {
+            "cell phone": { Lithium: 20, Copper: 30, Silicon: 10, Plastic: 40 },
+            "laptop": { Aluminum: 30, Silicon: 20, Lithium: 15, Copper: 35 },
+            "keyboard": { Plastic: 60, Silicon: 20, Copper: 20 },
+            "mouse": { Plastic: 50, Silicon: 30, Copper: 20 },
+            "tv": { Glass: 40, Lead: 10, Copper: 25, Plastic: 25 }
+        };
+
+        const elementProperties = {
+            Lithium: { symbol: "Li", atomicNumber: 3, category: "Alkali Metal", toxicity: "Low", recyclable: true },
+            Copper: { symbol: "Cu", atomicNumber: 29, category: "Transition Metal", toxicity: "Low", recyclable: true },
+            Silicon: { symbol: "Si", atomicNumber: 14, category: "Metalloid", toxicity: "Low", recyclable: true },
+            Plastic: { symbol: "C", atomicNumber: 6, category: "Polymer", toxicity: "Moderate", recyclable: false },
+            Glass: { symbol: "SiO2", atomicNumber: null, category: "Amorphous Solid", toxicity: "Low", recyclable: true },
+            Lead: { symbol: "Pb", atomicNumber: 82, category: "Post-Transition Metal", toxicity: "High", recyclable: true },
+            Aluminum: { symbol: "Al", atomicNumber: 13, category: "Post-Transition Metal", toxicity: "Low", recyclable: true }
+        };
+
+        let score = 0;
+        let currentDevice = null;
+        const progressFill = document.getElementById("progressFill");
+        const ctxChart = document.getElementById("chartCanvas").getContext("2d");
+        const ctxComparison = document.getElementById("comparisonCanvas").getContext("2d");
+        let materialChart = null;
+        let comparisonChart = null;
+
+        // New Feature 1: Multi-Device Scanning Capabilities
+        const multiDeviceComparison = {
+            devices: [],
+            
+            addDevice(deviceType, materialData) {
+                // Check if device already exists
+                const existingIndex = this.devices.findIndex(d => d.type === deviceType);
+                if (existingIndex >= 0) {
+                    this.devices[existingIndex] = {type: deviceType, materials: materialData};
+                } else {
+                    this.devices.push({type: deviceType, materials: materialData});
+                }
+                this.updateComparisonChart();
+                
+                // Add points for scanning a new device type
+                if (existingIndex < 0) {
+                    gamificationSystem.addPoints(25, `Scanned new device type: ${deviceType}`);
+                }
+            },
+            
+            updateComparisonChart() {
+                if (this.devices.length === 0) return;
+                
+                // Create a stacked bar chart comparing material composition across devices
+                const deviceLabels = this.devices.map(d => d.type);
+                const datasets = [];
+                
+                // Create datasets for each material type
+                const allMaterials = new Set();
+                this.devices.forEach(device => {
+                    Object.keys(device.materials).forEach(material => allMaterials.add(material));
+                });
+                
+                Array.from(allMaterials).forEach((material, index) => {
+                    const data = this.devices.map(device => device.materials[material] || 0);
+                    datasets.push({
+                        label: material,
+                        data: data,
+                        backgroundColor: materialColors[index % materialColors.length]
+                    });
+                });
+                
+                // Destroy existing chart if it exists
+                if (comparisonChart) {
+                    comparisonChart.destroy();
+                }
+                
+                // Render comparison chart
+                comparisonChart = new Chart(ctxComparison, {
+                    type: 'bar',
+                    data: {
+                        labels: deviceLabels,
+                        datasets: datasets
+                    },
+                    options: {
+                        responsive: true,
+                        plugins: {
+                            title: {
+                                display: true,
+                                text: 'Material Comparison Across Devices'
+                            },
+                            legend: {
+                                position: 'top'
+                            }
+                        },
+                        scales: {
+                            x: {
+                                stacked: true,
+                            },
+                            y: {
+                                stacked: true,
+                                title: {
+                                    display: true,
+                                    text: 'Percentage (%)'
+                                }
+                            }
+                        }
+                    }
+                });
+            }
+        };
+
+        // New Feature 2: Environmental Impact Calculator
+        function calculateEnvironmentalImpact(deviceType, materials) {
+            // Carbon footprint data (kg CO2 per gram of material)
+            const carbonFootprint = {
+                "Lithium": 0.15,
+                "Copper": 0.04,
+                "Silicon": 0.06,
+                "Plastic": 0.08,
+                "Glass": 0.03,
+                "Lead": 0.12,
+                "Aluminum": 0.05
+            };
+            
+            // Device weight approximations (in grams)
+            const deviceWeights = {
+                "cell phone": 180,
+                "laptop": 2000,
+                "keyboard": 900,
+                "mouse": 100,
+                "tv": 8000
+            };
+            
+            // Calculate total carbon impact
+            let totalCarbon = 0;
+            Object.entries(materials).forEach(([material, percentage]) => {
+                const materialWeight = deviceWeights[deviceType] * (percentage / 100);
+                totalCarbon += materialWeight * (carbonFootprint[material] || 0.05);
+            });
+            
+            // Calculate water usage (liters per device)
+            const waterUsage = deviceWeights[deviceType] * 0.2;
+            
+            // Calculate recycling benefit (% reduction in environmental impact)
+            const recyclingBenefit = 65;
+            
+            return {
+                carbonFootprint: totalCarbon.toFixed(2),
+                waterUsage: waterUsage.toFixed(2),
+                recyclingBenefit: recyclingBenefit
+            };
+        }
+
+        // New Feature 3: Augmented Reality Disassembly Guide
+        function showARDisassemblyGuide(deviceType) {
+            const disassemblySteps = {
+                "cell phone": [
+                    {step: 1, instruction: "Remove back cover", position: {x: 0, y: 0, z: 0.1}},
+                    {step: 2, instruction: "Remove battery", position: {x: 0, y: 0, z: 0.2}},
+                    {step: 3, instruction: "Unscrew circuit board", position: {x: 0, y: 0, z: 0.3}},
+                    {step: 4, instruction: "Detach display", position: {x: 0, y: 0, z: 0.4}},
+                    {step: 5, instruction: "Sort components by material", position: {x: 0, y: 0, z: 0.5}}
+                ],
+                "laptop": [
+                    {step: 1, instruction: "Turn over and unscrew back panel", position: {x: 0, y: 0, z: 0.1}},
+                    {step: 2, instruction: "Disconnect battery", position: {x: 0, y: 0, z: 0.2}},
+                    {step: 3, instruction: "Remove RAM and storage", position: {x: 0, y: 0, z: 0.3}},
+                    {step: 4, instruction: "Detach cooling system", position: {x: 0, y: 0, z: 0.4}},
+                    {step: 5, instruction: "Remove display assembly", position: {x: 0, y: 0, z: 0.5}}
+                ],
+                "keyboard": [
+                    {step: 1, instruction: "Remove keycaps", position: {x: 0, y: 0, z: 0.1}},
+                    {step: 2, instruction: "Unscrew and open housing", position: {x: 0, y: 0, z: 0.2}},
+                    {step: 3, instruction: "Detach circuit board", position: {x: 0, y: 0,z:0.3}},
+                    {step: 3, instruction: "Detach circuit board", position: {x: 0, y: 0, z: 0.3}},
+                    {step: 4, instruction: "Separate plastic parts", position: {x: 0, y: 0, z: 0.4}}
+                ],
+                "mouse": [
+                    {step: 1, instruction: "Remove bottom cover", position: {x: 0, y: 0, z: 0.1}},
+                    {step: 2, instruction: "Extract circuit board", position: {x: 0, y: 0, z: 0.2}},
+                    {step: 3, instruction: "Separate scroll wheel", position: {x: 0, y: 0, z: 0.3}}
+                ],
+                "tv": [
+                    {step: 1, instruction: "Remove back panel", position: {x: 0, y: 0, z: 0.1}},
+                    {step: 2, instruction: "Detach power supply", position: {x: 0, y: 0, z: 0.2}},
+                    {step: 3, instruction: "Separate T-Con board", position: {x: 0, y: 0, z: 0.3}},
+                    {step: 4, instruction: "Remove panel frame", position: {x: 0, y: 0, z: 0.4}},
+                    {step: 5, instruction: "Extract speaker assembly", position: {x: 0, y: 0, z: 0.5}}
+                ]
+            };
+            
+            const arScene = document.querySelector("#ar-scene");
+            const steps = disassemblySteps[deviceType] || [];
+            
+            // Clear existing instructions
+            const existingInstructions = document.querySelectorAll(".ar-instruction");
+            existingInstructions.forEach(el => el.parentNode.removeChild(el));
+            
+            // Add new AR instructions
+            steps.forEach(step => {
+                const instructionEntity = document.createElement("a-text");
+                instructionEntity.setAttribute("value", `Step ${step.step}: ${step.instruction}`);
+                instructionEntity.setAttribute("position", `${step.position.x} ${step.position.y} ${step.position.z}`);
+                instructionEntity.setAttribute("color", "white");
+                instructionEntity.setAttribute("bgcolor", "#333");
+                instructionEntity.setAttribute("scale", "0.5 0.5 0.5");
+                instructionEntity.setAttribute("class", "ar-instruction");
+                arScene.appendChild(instructionEntity);
+            });
+            
+            // Add points for viewing disassembly guide
+            gamificationSystem.addPoints(15, "Viewed disassembly guide");
+        }
+
+        // New Feature 4: Blockchain-Based Recycling Verification
+        const blockchainVerification = {
+            deviceHash: "",
+            
+            generateDeviceHash(deviceType, materials) {
+                const deviceData = JSON.stringify({
+                    type: deviceType,
+                    materials: materials,
+                    timestamp: Date.now()
+                });
+                
+                // Simple hash function for demo purposes
+                let hash = 0;
+                for (let i = 0; i < deviceData.length; i++) {
+                    const char = deviceData.charCodeAt(i);
+                    hash = ((hash << 5) - hash) + char;
+                    hash = hash & hash;
+                }
+                
+                this.deviceHash = hash.toString(16);
+                return this.deviceHash;
+            },
+            
+            generateQRCode(hash) {
+                const qrDiv = document.getElementById("verification-results");
+                
+                // In a real implementation, use a QR code library
+                qrDiv.innerHTML = `<div style="border:2px solid black;padding:20px;display:inline-block">
+                    <h3>Recycling Verification</h3>
+                    <p>Hash: ${hash}</p>
+                    <p>Scan this code at recycling center</p>
+                </div>`;
+                
+                // Add points for generating verification
+                gamificationSystem.addPoints(30, "Generated recycling verification token");
+            },
+            
+            verifyRecycling(hash) {
+                // In a real implementation, this would interface with a blockchain
+                return {
+                    verified: true,
+                    recyclingCenter: "EcoTech Recycling",
+                    timestamp: new Date().toISOString(),
+                    rewardPoints: 250
+                };
+            }
+        };
+
+        // New Feature 5: Machine Learning Material Value Estimator
+        async function estimateDeviceValue(deviceType, materials, condition) {
+            // Material market values ($/kg)
+            const materialValues = {
+                "Lithium": 17.25,
+                "Copper": 8.50,
+                "Silicon": 2.60,
+                "Plastic": 0.25,
+                "Aluminum": 1.75,
+                "Gold": 58000.00,
+                "Silver": 750.00,
+                "Palladium": 76500.00
+            };
+            
+            // Device weight approximations (in grams)
+            const deviceWeights = {
+                "cell phone": 180,
+                "laptop": 2000,
+                "keyboard": 900,
+                "mouse": 100,
+                "tv": 8000
+            };
+            
+            // Compute base material value
+            let totalValue = 0;
+            Object.entries(materials).forEach(([material, percentage]) => {
+                const materialWeight = deviceWeights[deviceType] * (percentage / 100) / 1000; // Convert to kg
+                totalValue += materialWeight * (materialValues[material] || 0);
+            });
+            
+            // Adjust for precious metals not visible in main composition
+            if (deviceType === "cell phone" || deviceType === "laptop") {
+                // Add trace amounts of gold, silver, palladium
+                totalValue += deviceWeights[deviceType] * 0.00001 * materialValues["Gold"]; // 0.001% gold
+                totalValue += deviceWeights[deviceType] * 0.0001 * materialValues["Silver"]; // 0.01% silver
+                totalValue += deviceWeights[deviceType] * 0.000005 * materialValues["Palladium"]; // 0.0005% palladium
+            }
+            
+            // Adjust for condition
+            const conditionMultiplier = {
+                "new": 1.0,
+                "good": 0.8,
+                "fair": 0.6,
+                "poor": 0.4
+            };
+            
+            totalValue *= conditionMultiplier[condition] || 0.5;
+            
+            return {
+                materialValue: totalValue.toFixed(2),
+                currencySymbol: "$",
+                recyclablePercentage: calculateRecyclablePercentage(materials)
+            };
+        }
+
+        function calculateRecyclablePercentage(materials) {
+            let recyclableWeight = 0;
+            let totalWeight = 0;
+            
+            Object.entries(materials).forEach(([material, percentage]) => {
+                totalWeight += percentage;
+                if (elementProperties[material]?.recyclable) {
+                    recyclableWeight += percentage;
+                }
+            });
+            
+            return Math.round((recyclableWeight / totalWeight) * 100);
+        }
+
+        // New Feature 7: Extended Reality Material View Mode
+        function enableXRMaterialView(deviceType) {
+            const materialTextures = {
+                "Lithium": "#a3c6ff",
+                "Copper": "#d4a276",
+                "Silicon": "#7f7f7f",
+                "Plastic": "#b3e0ff",
+                "Glass": "#ffffff",
+                "Lead": "#555555",
+                "Aluminum": "#d6d6d6"
+            };
+            
+            const device3DModel = document.querySelector("#inner-components");
+            
+            // Toggle material view mode
+            if (!device3DModel.getAttribute("material-view")) {
+                // Apply material textures to 3D model parts
+                const materials = materialInfo[deviceType];
+                let materialIndex = 0;
+                
+                // In a real implementation, this would map materials to specific model parts
+                // For demonstration, we're showing the concept
+                Object.keys(materials).forEach(material => {
+                    const colorEntity = document.createElement("a-entity");
+                    colorEntity.setAttribute("geometry", "primitive: box");
+                    colorEntity.setAttribute("material", `color: ${materialTextures[material]}`);
+                    colorEntity.setAttribute("position", `${materialIndex * 0.2} 0.5 0`);
+                    colorEntity.setAttribute("scale", "0.1 0.1 0.1");
+                    
+                    const textEntity = document.createElement("a-text");
+                    textEntity.setAttribute("value", material);
+                    textEntity.setAttribute("position", `${materialIndex * 0.2} 0.7 0`);
+                    textEntity.setAttribute("scale", "0.2 0.2 0.2");
+                    textEntity.setAttribute("align", "center");
+                    
+                    document.querySelector("a-marker").appendChild(colorEntity);
+                    document.querySelector("a-marker").appendChild(textEntity);
+                    
+                    materialIndex++;
+                });
+                
+                device3DModel.setAttribute("material-view", "true");
+                
+                // Add points for using material view
+                gamificationSystem.addPoints(20, "Used material view mode");
+            } else {
+                // Remove material view elements
+                const markerScene = document.querySelector("a-marker");
+                const materialElements = markerScene.querySelectorAll("a-entity:not(#inner-components)");
+                materialElements.forEach(el => markerScene.removeChild(el));
+                
+                const textElements = markerScene.querySelectorAll("a-text");
+                textElements.forEach(el => markerScene.removeChild(el));
+                
+                device3DModel.removeAttribute("material-view");
+            }
+        }
+
+        // New Feature 8: Gamification System
+        const gamificationSystem = {
+            userPoints: 0,
+            userLevel: 1,
+            devicesRecycled: 0,
+            achievements: [],
+            
+            initUI() {
+                const gameDiv = document.createElement("div");
+                gameDiv.id = "gamification";
+                gameDiv.innerHTML = `
+                    <div style="background-color:#f0f0f0;padding:15px;border-radius:10px;margin-top:20px;">
+                        <h3>Recycling Progress</h3>
+                        <div style="display:flex;justify-content:space-around;text-align:center;">
+                            <div>
+                                <div style="font-size:24px;font-weight:bold;" id="user-points">0</div>
+                                <div>Points</div>
+                            </div>
+                            <div>
+                                <div style="font-size:24px;font-weight:bold;" id="user-level">1</div>
+                                <div>Level</div>
+                            </div>
+                            <div>
+                                <div style="font-size:24px;font-weight:bold;" id="devices-recycled">0</div>
+                                <div>Devices</div>
+                            </div>
+                        </div>
+                        <div id="achievements-list" style="margin-top:10px;"></div>
+                    </div>
+                `;
+                document.body.appendChild(gameDiv);
+            },
+            
+            addPoints(points, reason) {
+                this.userPoints += points;
+                document.getElementById("user-points").innerText = this.userPoints;
+                
+                // Level up system
+                const newLevel = Math.floor(this.userPoints / 500) + 1;
+                if (newLevel > this.userLevel) {
+                    this.userLevel = newLevel;
+                    document.getElementById("user-level").innerText = this.userLevel;
+                    this.unlockAchievement("Level Up", `Reached recycling level ${this.userLevel}!`);
+                }
+                
+                // Show points notification
+                this.showNotification(`+${points} points: ${reason}`);
+            },
+            
+            recordDeviceRecycled(deviceType) {
+                this.devicesRecycled++;
+                document.getElementById("devices-recycled").innerText = this.devicesRecycled;
+                
+                // Check for achievements
+                if (this.devicesRecycled === 1) {
+                    this.unlockAchievement("First Steps", "Recycled your first device!");
+                } else if (this.devicesRecycled === 5) {
+                    this.unlockAchievement("Getting Started", "Recycled 5 devices!");
+                } else if (this.devicesRecycled === 10) {
+                    this.unlockAchievement("Eco Warrior", "Recycled 10 devices!");
+                }
+                
+                // Add recycling points
+                this.addPoints(50, `Recycled ${deviceType}`);
+            },
+            
+            unlockAchievement(title, description) {
+                if (this.achievements.includes(title)) return;
+                
+                this.achievements.push(title);
+                
+                // Add achievement to UI
+                const achievementsList = document.getElementById("achievements-list");
+                const achievementElement = document.createElement("div");
+                achievementElement.className = "achievement";
+                achievementElement.innerHTML = `
+                    <strong>🏆 ${title}</strong>: ${description}
+                `;
+                achievementsList.appendChild(achievementElement);
+                
+                // Show notification
+                this.showNotification(`Achievement Unlocked: ${title}`);
+                
+                // Add points for achievement
+                this.addPoints(100, `Achievement: ${title}`);
+            },
+            
+            showNotification(message) {
+                const notification = document.createElement("div");
+                notification.className = "notification";
+                notification.textContent = message;
+                document.body.appendChild(notification);
+                
+                // Remove notification after 3 seconds
+                setTimeout(() => {
+                    notification.style.opacity = "0";
+                    notification.style.transform = "translateX(100%)";
+                    setTimeout(() => {
+                        document.body.removeChild(notification);
+                    }, 500);
+                }, 3000);
+            }
+        };
+
+        async function loadModel() {
+            return await cocoSsd.load();
+        }
+
+        async function setupCamera() {
+            const video = document.getElementById('video');
+            const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+            video.srcObject = stream;
+            return new Promise(resolve => video.onloadedmetadata = resolve);
+        }
+
+        function drawMaterialChart(materialData) {
+            // Destroy existing chart if it exists
+            if (materialChart) {
+                materialChart.destroy();
+            }
+            
+            materialChart = new Chart(ctxChart, {
+                type: 'pie',
+                data: {
+                    labels: Object.keys(materialData),
+                    datasets: [{
+                        label: 'Material Composition (%)',
+                        data: Object.values(materialData),
+                        backgroundColor: materialColors.slice(0, Object.keys(materialData).length),
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        legend: { position: 'top' },
+                        title: { display: true, text: 'Material Composition' }
+                    }
+                }
+            });
+        }
+
+        function highlightPeriodicTable(elements) {
+            const elementsContainer = document.getElementById("elements");
+            elementsContainer.innerHTML = "";
+            Object.keys(elements).forEach(element => {
+                const properties = elementProperties[element];
+                if (!properties) return;
+                
+                const elementHTML = `
+                    <div style="border: 1px solid black; padding: 10px; margin: 5px; display: inline-block;">
+                        <strong>${element} (${properties.symbol})</strong><br>
+                        Category: ${properties.category}<br>
+                        Toxicity: ${properties.toxicity}<br>
+                        Recyclable: ${properties.recyclable ? "Yes": "No"}
+                        </div>
+                `;
+                elementsContainer.innerHTML += elementHTML;
+            });
+        }
+
+        function updateEnvironmentalImpact(deviceType, materials) {
+            const impact = calculateEnvironmentalImpact(deviceType, materials);
+            const impactContainer = document.getElementById("impact-results");
+            
+            impactContainer.innerHTML = `
+                <div style="display:flex;flex-wrap:wrap;justify-content:space-around;margin-top:15px;">
+                    <div style="text-align:center;padding:10px;width:30%;">
+                        <div style="font-size:24px;font-weight:bold;">${impact.carbonFootprint}</div>
+                        <div>kg CO₂</div>
+                    </div>
+                    <div style="text-align:center;padding:10px;width:30%;">
+                        <div style="font-size:24px;font-weight:bold;">${impact.waterUsage}</div>
+                        <div>Liters Water</div>
+                    </div>
+                    <div style="text-align:center;padding:10px;width:30%;">
+                        <div style="font-size:24px;font-weight:bold;">${impact.recyclingBenefit}%</div>
+                        <div>Impact Reduction</div>
+                    </div>
+                </div>
+                <div style="margin-top:10px;">
+                    Properly recycling this device can save ${Math.round(impact.carbonFootprint * impact.recyclingBenefit / 100)} kg of CO₂ emissions!
+                </div>
+            `;
+        }
+
+        function updateMaterialValue(deviceType, materials) {
+            const condition = document.getElementById("device-condition").value;
+            
+            estimateDeviceValue(deviceType, materials, condition).then(valueData => {
+                const valueContainer = document.getElementById("value-results");
+                
+                valueContainer.innerHTML = `
+                    <div style="display:flex;flex-wrap:wrap;justify-content:space-around;margin-top:15px;">
+                        <div style="text-align:center;padding:10px;width:45%;">
+                            <div style="font-size:24px;font-weight:bold;">${valueData.currencySymbol}${valueData.materialValue}</div>
+                            <div>Material Value</div>
+                        </div>
+                        <div style="text-align:center;padding:10px;width:45%;">
+                            <div style="font-size:24px;font-weight:bold;">${valueData.recyclablePercentage}%</div>
+                            <div>Recyclable Content</div>
+                        </div>
+                    </div>
+                `;
+            });
+        }
+
+        async function detectObjects(model) {
+            const video = document.getElementById('video');
+            const canvas = document.getElementById('canvas');
+            const ctx = canvas.getContext('2d');
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+
+            async function detectFrame() {
+                const predictions = await model.detect(video);
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+                predictions.forEach(prediction => {
+                    if (objectModels[prediction.class] && prediction.score > 0.7) {
+                        ctx.strokeStyle = 'green';
+                        ctx.lineWidth = 4;
+                        ctx.strokeRect(
+                            prediction.bbox[0],
+                            prediction.bbox[1],
+                            prediction.bbox[2],
+                            prediction.bbox[3]
+                        );
+                        ctx.fillStyle = 'green';
+                        ctx.fillText(`${prediction.class} (${Math.round(prediction.score * 100)}%)`, prediction.bbox[0], prediction.bbox[1] - 5);
+
+                        // Record the current device for later use
+                        currentDevice = prediction.class;
+
+                        // Update UI
+                        document.getElementById('info').innerText = sortingInfo[prediction.class];
+                        document.getElementById('components').innerText = "Components: " + componentsInfo[prediction.class].join(", ");
+                        document.getElementById('materials').innerText = "Materials: " + Object.entries(materialInfo[prediction.class])
+                            .map(([material, percentage]) => `${material}: ${percentage}%`)
+                            .join(", ");
+
+                        // Draw Material Chart
+                        drawMaterialChart(materialInfo[prediction.class]);
+
+                        // Add to multi-device comparison
+                        multiDeviceComparison.addDevice(prediction.class, materialInfo[prediction.class]);
+
+                        // Update Environmental Impact
+                        updateEnvironmentalImpact(prediction.class, materialInfo[prediction.class]);
+
+                        // Update Material Value Estimate
+                        updateMaterialValue(prediction.class, materialInfo[prediction.class]);
+
+                        // Show AR Disassembly Guide
+                        showARDisassemblyGuide(prediction.class);
+
+                        // Enable XR Material View
+                        enableXRMaterialView(prediction.class);
+
+                        // Highlight Periodic Table
+                        highlightPeriodicTable(materialInfo[prediction.class]);
+
+                        // Generate blockchain verification hash
+                        blockchainVerification.generateDeviceHash(prediction.class, materialInfo[prediction.class]);
+
+                        // Update Score
+                        updateScore();
+
+                        // Speak Chemical Insights
+                        speakChemicalInsights(materialInfo[prediction.class]);
+                    }
+                });
+
+                requestAnimationFrame(detectFrame);
+            }
+            detectFrame();
+        }
+
+        function updateScore() {
+            score += 10;
+            document.getElementById('score').innerText = `Score: ${score}`;
+            progressFill.style.width = `${Math.min(score, 100)}%`;
+        }
+
+        function speakChemicalInsights(materials) {
+            // Only speak if speech synthesis is available
+            if ('speechSynthesis' in window) {
+                const utterance = new SpeechSynthesisUtterance("This device contains:");
+                Object.keys(materials).forEach(material => {
+                    const properties = elementProperties[material];
+                    if (properties) {
+                        utterance.text += ` ${material}, which is ${properties.toxicity} in toxicity and ${properties.recyclable ? "recyclable" : "not recyclable"}.`;
+                    }
+                });
+                
+                // Cancel any ongoing speech
+                window.speechSynthesis.cancel();
+                
+                // Speak the new insights
+                window.speechSynthesis.speak(utterance);
+            }
+        }
+
+        // Initialize the application
+        (async function() {
+            // Initialize gamification system
+            gamificationSystem.initUI();
+            
+            // Setup event listeners
+            document.getElementById("verify-button").addEventListener("click", function() {
+                if (currentDevice && blockchainVerification.deviceHash) {
+                    blockchainVerification.generateQRCode(blockchainVerification.deviceHash);
+                    
+                    // Record device as recycled for gamification
+                    gamificationSystem.recordDeviceRecycled(currentDevice);
+                }
+            });
+            
+            document.getElementById("estimate-button").addEventListener("click", function() {
+                if (currentDevice) {
+                    const condition = document.getElementById("device-condition").value;
+                    updateMaterialValue(currentDevice, materialInfo[currentDevice]);
+                    
+                    // Add points for checking value
+                    gamificationSystem.addPoints(10, "Estimated device value");
+                }
+            });
+            
+            // Initialize app
+            await setupCamera();
+            const model = await loadModel();
+            detectObjects(model);
+            
+            // Initial achievement
+            setTimeout(() => {
+                gamificationSystem.unlockAchievement("E-Waste Hero", "Started your recycling journey!");
+            }, 2000);
+        })();
+    </script>
+</body>
+</html>
+
